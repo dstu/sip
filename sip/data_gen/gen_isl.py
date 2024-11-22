@@ -1,5 +1,7 @@
 import random
 from collections import *
+import copy
+import itertools
 
 import pynini, pywrapfst
 
@@ -7,15 +9,29 @@ class NotKISLError(Exception):
     def __init__(self):
         pass
 
+class ISLTransducer:
+    def __init__(self, fst):
+        self.fst = fst
+        self.uninteresting_chars = None
+        self.state_names = None
+
+    def copy(self):
+        xcopy = ISLTransducer(self.fst.copy())
+        xcopy.state_names = copy.copy(self.state_names)
+        xcopy.uninteresting_chars = copy.copy(self.uninteresting_chars)
+        return xcopy
+
 def choose_input_char(alphabet, xi, f_len):
-    if xi == 0 or xi == f_len - 1:
-        #string terminator is not allowed within a factor, since this cannot ever occur
+    if xi == 0:
         return random.choice(list(alphabet) + ["<s>"])
+    elif xi == f_len - 1:
+        return random.choice(list(alphabet) + ["</s>"])
     else:
+        #string terminator is not allowed in the interior of the string
         return random.choice(alphabet)
 
 def transduce_terminator(xi):
-    if xi == "<s>":
+    if xi in ["<s>", "</s>"]:
         return "<e>"
     else:
         return xi
@@ -45,7 +61,7 @@ def select_factors(n_factors, factor_length, alphabet, p_progressive:float=0, p_
             else:
                 epenthesis_type = "short"
                 f_len -= 1
-        
+
         fx = tuple([choose_input_char(alphabet, xi, f_len) for xi in range(f_len)])
         #factors must be unique on input side so transduction is deterministic
         if fx not in factors:
@@ -59,7 +75,7 @@ def select_factors(n_factors, factor_length, alphabet, p_progressive:float=0, p_
             elif random.random() < p_regressive:
                 f_out = (random.choice(output_alphabet),) + fx[1:]
             else:
-                f_out = tuple([random.choice(output_alphabet) for xi in range(factor_length)])
+                f_out = tuple([random.choice(output_alphabet) for xi in range(f_len)])
 
             if epenthesis_type == "short":
                 index = random.randrange(len(f_out))
@@ -72,7 +88,7 @@ def select_factors(n_factors, factor_length, alphabet, p_progressive:float=0, p_
                 f_out = tuple(f_new)
 
             f_out = tuple([transduce_terminator(xi) for xi in f_out])
-                
+            assert(len(fx) == len(f_out))
             factors.append((fx, f_out))
 
     return factors
@@ -85,12 +101,6 @@ def char_seqs(alphabet, factor_length:int):
     for char in alphabet:
         for ch_seq in char_seqs(alphabet, factor_length - 1):
             yield (char,) + ch_seq
-
-def add_sym(alphabet, char):
-    if type(char) is str and len(char) == 1:
-        alphabet.add_symbol(char, key=ord(char))
-    else:
-        alphabet.add_symbol(str(char))
 
 def has_outgoing(arcs, char):
     for ai in arcs:
@@ -320,19 +330,113 @@ def merge_states(trie):
 
 def replace_stars(char, out, alphabet):
     def replace(cx, rr):
-        if cx == "*":
-            return rr
-        return cx
+        # if cx == "*":
+        #     return rr
+        # return cx
+        return cx.replace("*", rr)
 
     if char == "*" or "*" in out:
         for repl in alphabet:
             n_char = replace(char, repl)
-            n_out = tuple([replace(ci, repl) for ci in out])
+            if isinstance(out, str):
+                n_out = replace(out, repl)
+            else:
+                n_out = tuple([replace(ci, repl) for ci in out])
             yield n_char, n_out
     else:
         yield char, out
 
-def renumber_states(states, trans, uninteresting, full_isl_transducer=False):
+def replace_star_transitions(fst):
+    fst = fst.copy()
+    isyms = pynini.SymbolTable()
+    old_isyms = fst.fst.input_symbols()
+    for ii in range(old_isyms.num_symbols()):
+        key = old_isyms.get_nth_key(ii)
+        val = old_isyms.find(key)
+        isyms.add_symbol(val)
+
+    osyms = pynini.SymbolTable()
+    old_osyms = fst.fst.output_symbols()
+    for ii in range(old_osyms.num_symbols()):
+        key = old_osyms.get_nth_key(ii)
+        val = old_osyms.find(key)
+        osyms.add_symbol(val)
+
+    copied_arcs = {}
+    for state in fst.fst.states():
+        copied_arcs[state] = list(fst.fst.arcs(state))
+
+    for state, arcs in copied_arcs.items():
+        fst.fst.delete_arcs(state)
+
+        for arc in arcs:
+            char = old_isyms.find(arc.ilabel)
+            rewrite = old_osyms.find(arc.olabel)
+            for char_c, rewrite_c in replace_stars(char, rewrite, fst.uninteresting_chars):
+                if rewrite_c == tuple():
+                    rewrite_c = "<e>"
+                if len(rewrite_c) == 1:
+                    rewrite_c = rewrite_c[0]
+
+                fst.fst.add_arc(state,
+                                pynini.Arc(isyms.add_symbol(char_c),
+                                           osyms.add_symbol(str(rewrite_c)),
+                                           0,
+                                           arc.nextstate))
+
+    fst.fst.set_input_symbols(isyms)
+    fst.fst.set_output_symbols(osyms)
+
+    return fst
+
+def replace_star_state(fst):
+    fst = fst.copy()
+    nstate = {}
+    mapping = {}
+    old_states = list(fst.fst.states())
+    for ind, state in fst.state_names.items():
+        nstate[state] = ind
+        mapping[ind] = [ind,]
+
+    def new_state():
+        while True:
+            fst.fst.add_state()
+            yield len(nstate)
+
+    for ind, state in fst.state_names.items():
+        if "*" in state:
+            del nstate[state]
+            mapping[ind] = []
+            names = itertools.chain([ind,], new_state())
+            for _, new_state in replace_stars("", state, fst.uninteresting_chars):
+                new_name = next(names)
+                nstate[new_state] = new_name
+                mapping[ind].append(nstate[new_state])
+
+    copied_arcs = {}
+    for state in old_states:
+        copied_arcs[state] = list(fst.fst.arcs(state))
+
+    isyms = fst.fst.input_symbols()
+
+    for state, arcs in copied_arcs.items():
+        fst.fst.delete_arcs(state)
+
+        for m_src in mapping[state]:
+            for arc in arcs:
+                char = isyms.find(arc.ilabel)
+                m_dest = nstate[(char,)]
+                fst.fst.add_arc(m_src,
+                                pynini.Arc(arc.ilabel,
+                                           arc.olabel,
+                                           0,
+                                           m_dest))
+
+    fst.state_names = nstate
+
+    return fst
+
+def renumber_states(states, trans):
     nstate = { ("<s>",) : 0,
                ("</s>",) : 1, }
     mapping = {}
@@ -346,41 +450,33 @@ def renumber_states(states, trans, uninteresting, full_isl_transducer=False):
         name = rstate[ind]
         mapping[ind] = []
 
-        if full_isl_transducer and "*" in name:
-            for _, new_state in replace_stars("", name, uninteresting):
-                if new_state not in nstate:
-                    nstate[new_state] = len(nstate)
+        if name not in nstate:
+            nstate[name] = len(nstate)
 
-                mapping[ind].append(nstate[new_state])
-        else:
-            if name not in nstate:
-                nstate[name] = len(nstate)
-
-            mapping[ind] = [nstate[name],]
+        mapping[ind] = nstate[name]
 
     # print("renumbering", mapping)
             
     ntrans = {}
     for ind, tt in trans.items():
-        for m_src in mapping[ind]:
-            ntrans[m_src] = {}
-            for char, (out, dest) in tt.items():
-                for char_c, out_c in replace_stars(char, out, uninteresting):
-                    if out_c == tuple():
-                        out_c = "<e>"
-                    if len(out_c) == 1:
-                        out_c = out_c[0]
-                    for m_dest in mapping[dest]:
-                        ntrans[m_src][char_c] = (out_c, m_dest)
-    
+        m_src = mapping[ind]
+        ntrans[m_src] = {}
+        for char, (out, dest) in tt.items():
+            if out == tuple():
+                out = "<e>"
+            if len(out) == 1:
+                out = out[0]
+
+            ntrans[m_src][char] = (out, mapping[dest])
+
     rstate = {}
     for state, ind in nstate.items():
         rstate[ind] = state
 
     return nstate, rstate, ntrans
 
-def make_2isl_transducer(factors, alphabet, full_isl_transducer:bool=False, minimize:bool=True):
-    print("Making ISL transducer for factor set:", factors)
+def make_2isl_transducer(factors, alphabet, minimize:bool=True):
+    # print("Making ISL transducer for factor set:", factors)
 
     important_chars = set(["*"])
     for (in_s, out_s) in factors:
@@ -389,6 +485,7 @@ def make_2isl_transducer(factors, alphabet, full_isl_transducer:bool=False, mini
 
     important_chars.discard("<e>")
     important_chars.discard("<s>")
+    important_chars.discard("</s>")
 
     trie = Trie()
 
@@ -409,14 +506,12 @@ def make_2isl_transducer(factors, alphabet, full_isl_transducer:bool=False, mini
     state, trans = merge_states(trie)
     # print(trans)
     # print("renum")
-    state, rstate, trans = renumber_states(state, trans,
-                                           set(alphabet).difference(important_chars),
-                                           full_isl_transducer=full_isl_transducer)
+    state, rstate, trans = renumber_states(state, trans)
     # print(state)
     # print(rstate)
     # print(trans)
 
-    fst = pynini.Fst()
+    fst = ISLTransducer(pynini.Fst())
     input_alphabet = pynini.SymbolTable()
     output_alphabet = pynini.SymbolTable()
     input_alphabet.add_symbol("<e>", key=0)
@@ -425,59 +520,73 @@ def make_2isl_transducer(factors, alphabet, full_isl_transducer:bool=False, mini
     for ind, tt in trans.items():
         for char, (out, dest) in tt.items():
             #print("adding", char, out)
-            add_sym(input_alphabet, char)
-            add_sym(output_alphabet, out)
+            input_alphabet.add_symbol(char)
+            output_alphabet.add_symbol(str(out))
 
-    fst.set_input_symbols(input_alphabet)
-    fst.set_output_symbols(output_alphabet)
+    fst.fst.set_input_symbols(input_alphabet)
+    fst.fst.set_output_symbols(output_alphabet)
 
-    fst.add_states(len(trans))
+    fst.fst.add_states(len(trans))
     for ind, trans in trans.items():
         for char, (out, dest) in trans.items():
-            fst.add_arc(ind,
-                        pynini.Arc(input_alphabet.find(char),
-                                   output_alphabet.find(str(out)),
-                                   0,
-                                   dest))
-    fst.set_start(0)
-    fst.set_final(1)
+            fst.fst.add_arc(ind,
+                            pynini.Arc(input_alphabet.find(char),
+                                       output_alphabet.find(str(out)),
+                                       0,
+                                       dest))
+    fst.fst.set_start(0)
+    fst.fst.set_final(1)
+
+    fst.uninteresting_chars = set(alphabet).difference(important_chars)
+    fst.state_names = rstate
 
     if minimize:
         copied_fst = fst.copy()
-        fst = fst.minimize(allow_nondet=False)
+        fst.fst = fst.fst.minimize(allow_nondet=False)
         # Check that minimization didn't introduce any transitions that have epsilon on the input tape
         minimized_ok = True
-        for state in fst.states():
-            for arc in fst.arcs(state):
+        for state in fst.fst.states():
+            for arc in fst.fst.arcs(state):
                 if input_alphabet.find(arc.ilabel) == "<e>":
                     minimized_ok = False
                     break
         if not minimized_ok:
             # print("Failed to minimize")
-            fst = copied_fst
-    
+            fst.fst = copied_fst
+        else:
+            fst.state_names = None
+
     return fst
 
 def print_fst(fst):
-    in_sym = fst.input_symbols()
-    out_sym = fst.output_symbols()
+    in_sym = fst.fst.input_symbols()
+    out_sym = fst.fst.output_symbols()
 
-    for ind in fst.states():
+    for ind in fst.fst.states():
         print(ind)
-        for arc in fst.arcs(ind):
+        for arc in fst.fst.arcs(ind):
             print(f"\t{arc.ilabel}:{arc.olabel} -> {arc.nextstate}",
                   f"\t{in_sym.find(arc.ilabel)}:{out_sym.find(arc.olabel)}")
 
 def test_fst(fst, string, expected=None):
-    in_sym = fst.input_symbols()
-    out_sym = fst.output_symbols()
-    fst.arcsort("ilabel")
+    fst = replace_star_transitions(fst)
+    # print("After replacement")
+    # print("uninteresting set", fst.uninteresting_chars)
+    # print_fst(fst)
+    if fst.state_names != None:
+        fst = replace_star_state(fst)
+        # print("After state repl")
+        # print_fst(fst)
+
+    in_sym = fst.fst.input_symbols()
+    out_sym = fst.fst.output_symbols()
+    fst.fst.arcsort("ilabel")
     string = " ".join(string) + " </s>"
     acc = pynini.accep(string, token_type=in_sym)
     acc.set_input_symbols(in_sym)
     acc.set_output_symbols(in_sym)
     
-    comp = pynini.compose(acc, fst)
+    comp = pynini.compose(acc, fst.fst)
     result = normalize_string(comp.string(out_sym))
     print(result)
     if expected != None and result != " ".join(expected):
@@ -600,6 +709,18 @@ if __name__ == "__main__":
     test_fst(fst, "aaba", "caaba")
     print()
 
+    print("Suffix to string:")
+    fst = make_2isl_transducer(
+        [
+            (("</s>",), ("c",)),
+        ],
+        "abc")
+    print_fst(fst)
+    test_fst(fst, "a", "ac")
+    test_fst(fst, "b", "bc")
+    test_fst(fst, "aaba", "aabac")
+    print()
+
     print("Illegitimate pattern (same character twice in input):")
     try:
         fst = make_2isl_transducer(
@@ -621,3 +742,5 @@ if __name__ == "__main__":
             "abc")
     except NotKISLError:
         print("Language is not 2ISL")
+
+    #check that string suffixation is handled correctly

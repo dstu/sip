@@ -1,4 +1,5 @@
 from typing import List, Tuple
+from sip.data_gen.gen_isl import ISLTransducer
 
 import pynini
 import pywrapfst
@@ -23,7 +24,6 @@ def fst_to_json(fst: pynini.Fst):
             # final state => 2, non-final state => 1, (can use 0 for padding)
             s.append((state, arc_to_str(arc.ilabel), arc_to_str(arc.olabel), arc.nextstate, dest_is_final))
     return s
-
 
 def outgoing_arc_ilabels(fst: pynini.Fst, state: int):
     for arc in fst.arcs(state):
@@ -64,9 +64,15 @@ def one_step(alphabet):
     fst.add_state()
     fst.set_start(0)
     fst.set_final(1, 0)
-    for c in alphabet:
-        fst.add_arc(0, Arc(ord(c), ord(c), 0, 1))
+    if isinstance(alphabet, pywrapfst.SymbolTableView):
+        for ii in range(alphabet.num_symbols()):
+            key = alphabet.get_nth_key(ii)
+            fst.add_arc(0, Arc(key, key, 0, 1))
+    else:
+        for c in alphabet:
+            fst.add_arc(0, Arc(ord(c), ord(c), 0, 1))
     return fst
+
 def gen_pair(fst, token_type="utf8", **kwargs):
     """
     Generate an input/output pair from a transducer.
@@ -91,35 +97,49 @@ def graph_hash(fst):
         for arc in fst.arcs(state):
             s += fst.num_arcs(state) * (hash((arc.ilabel, arc.olabel)))
     return s
+
+def graphfst(f1):
+    if isinstance(f1, ISLTransducer):
+        return f1.fst
+    else:
+        return f1
+
 class FSTCollection:
     def __init__(self):
         self.hash2fst = dict()
         self.size = 0
 
-    def maybe_add(self, f: Fst, vocab = None):
+    def maybe_add(self, f1: Fst, vocab = None):
+        f = graphfst(f1)
         hash = graph_hash(f)
         if hash in self.hash2fst:
             if vocab is not None:
-                if not any(pywrapfst.isomorphic(graph, f) for graph, _ in self.hash2fst[hash]):
-                    self.hash2fst[hash].append((f, vocab))
+                graphs = [graphfst(graph) for graph, _ in self.hash2fst[hash]]
+                if not any(pywrapfst.isomorphic(graph, f) for graph in graphs):
+                    self.hash2fst[hash].append((f1, vocab))
             else:
-                if not any(pywrapfst.isomorphic(graph, f) for graph in self.hash2fst[hash]):
-                    self.hash2fst[hash].append(f)
+                graphs = [graphfst(graph) for graph in self.hash2fst[hash]]
+                if not any(pywrapfst.isomorphic(graph, f) for graph in graphs):
+                    self.hash2fst[hash].append(f1)
                     self.size += 1
         else:
             if vocab is not None:
-                self.hash2fst[hash] = [(f, vocab)]
+                self.hash2fst[hash] = [(f1, vocab)]
             else:
-                self.hash2fst[hash] = [f]
+                self.hash2fst[hash] = [f1]
             self.size += 1
 
     def __contains__(self, element):
+        element = graphfst(element)
+
         hash = graph_hash(element)
         if hash not in self.hash2fst:
             return False
         for obj in self.hash2fst[hash]:
             if isinstance(obj, tuple):
                 graph, _ = obj
+                graph = graphfst(graph)
+
                 if pywrapfst.isomorphic(graph, element):
                     return True
             else:
