@@ -27,27 +27,29 @@ class MachineEmbedder(ABC,  torch.nn.Module):
         raise NotImplementedError()
 
 def create_simple_fst_embedder(num_states: int,
-                 fst_tokenizer_path: str,
+                 fst_tokenizer: str,
                  state_embedding_dim: int,
                  token_embedding_dim: int,
                 **kwargs):
-    return SimpleFSTEmbedder(num_states, fst_tokenizer_path, state_embedding_dim, token_embedding_dim, **kwargs)
+    return SimpleFSTEmbedder(num_states, fst_tokenizer, state_embedding_dim, token_embedding_dim, **kwargs)
 
 class SimpleFSTEmbedder(MachineEmbedder):
     def __init__(self,  num_states: int,
-                 fst_tokenizer_path: str,
+                 fst_tokenizer,
                  state_embedding_dim: int,
                  token_embedding_dim: int,
                  mlp_hidden_dim: Optional[int] = None,
                  final_state_embedding_dim: int = 0,
                  num_final_state_info: int = 3,
+                 fst_format: Optional[str] = None,
                  *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.state_embeddings = torch.nn.Embedding(num_states, state_embedding_dim)
-        self.fst_tokenizer = PreTrainedTokenizerFast(tokenizer_file=fst_tokenizer_path)
+        self.fst_tokenizer = fst_tokenizer
         self.token_embeddings = torch.nn.Embedding(self.fst_tokenizer.vocab_size, token_embedding_dim)
         self.final_state_embedding = torch.nn.Embedding(num_final_state_info, final_state_embedding_dim)
 
+        self.fst_format = fst_format
 
         self.down_project = None
         if mlp_hidden_dim is not None:
@@ -65,18 +67,25 @@ class SimpleFSTEmbedder(MachineEmbedder):
         fst_rep = kwargs["fst_rep"] #shape (batch, transition count, 4 or 5)
         del kwargs["fst_rep"]
 
+        if self.fst_format == None:
+            from_rep = self.state_embeddings(fst_rep[:, :, 0]) #shape (batch, transition count, embed dim)
+            to_rep = self.state_embeddings(fst_rep[:, :, 3]) #shape (batch, transition count, embed dim)
+            io_rep = self.token_embeddings(fst_rep[:, :, 1:3]) #shape (batch, transition count, 2, embed dim)
+            io_rep = torch.flatten(io_rep, start_dim=2)
 
-        from_rep = self.state_embeddings(fst_rep[:, :, 0]) #shape (batch, transition count, embed dim)
-        to_rep = self.state_embeddings(fst_rep[:, :, 3]) #shape (batch, transition count, embed dim)
-        io_rep = self.token_embeddings(fst_rep[:, :, 1:3]) #shape (batch, transition count, 2, embed dim)
-        io_rep = torch.flatten(io_rep, start_dim=2)
+            if fst_rep.shape[-1] == 5:
+                final_state_rep = self.final_state_embedding(fst_rep[:, :, 4])
+                flat_total_fst_rep = torch.cat([from_rep, to_rep, io_rep, final_state_rep],
+                                               dim=2)  # shape (batch, transition, 2* state embed dim + 2 * token embed dim)
+            else:
+                flat_total_fst_rep = torch.cat([from_rep, to_rep, io_rep], dim=2) #shape (batch, transition, 2* state embed dim + 2 * token embed dim)
+        elif self.fst_format == "isl_canon":
+            from_rep = self.state_embeddings(fst_rep[:, :, 0]) #shape (batch, transition count, embed dim)
+            to_rep = self.state_embeddings(fst_rep[:, :, 4]) #shape (batch, transition count, embed dim)
+            io_rep = self.token_embeddings(fst_rep[:, :, 1:4]) #shape (batch, transition count, 2, embed dim)
+            io_rep = torch.flatten(io_rep, start_dim=2)
 
-        if fst_rep.shape[-1] == 5:
-            final_state_rep = self.final_state_embedding(fst_rep[:, :, 4])
-            flat_total_fst_rep = torch.cat([from_rep, to_rep, io_rep, final_state_rep],
-                                           dim=2)  # shape (batch, transition, 2* state embed dim + 2 * token embed dim)
-        else:
-            flat_total_fst_rep = torch.cat([from_rep, to_rep, io_rep], dim=2) #shape (batch, transition, 2* state embed dim + 2 * token embed dim)
+            flat_total_fst_rep = torch.cat([from_rep, to_rep, io_rep], dim=2) #shape (batch, transition, 2* state embed dim + 3 * token embed dim)
 
         if self.down_project is not None:
             fst_embed = self.output_layer(self.dropout(torch.nn.functional.gelu(self.down_project(flat_total_fst_rep))))
@@ -193,6 +202,7 @@ class SIPPreTrainingModel(PreTrainedModel):
         embedded_inputs = self.model.get_input_embeddings()(kwargs["input_ids"])
         batch_size = embedded_inputs.shape[0]
 
+        assert(0), "not useful"
 
         ### embed FST
         fst_rep = kwargs.pop("fst_rep")  # shape (batch, transition count, 4 or 5)
