@@ -2,12 +2,35 @@ import random
 from collections import *
 import copy
 import itertools
+import ast
 
 import pynini, pywrapfst
+
+#both control characters from the ASCII block
+SYMBOL_EPSILON = 20
+SYMBOL_RDELIM = 19
 
 class NotKISLError(Exception):
     def __init__(self):
         pass
+
+def encode_sym(sym):
+    if sym == "<e>":
+        return chr(SYMBOL_EPSILON)
+    elif sym == "</s>":
+        return chr(SYMBOL_RDELIM)
+    else:
+        return ord(sym)
+
+def encode_output(syms):
+    if syms.startswith("("):
+        syms = ast.literal_eval(syms)
+
+    if isinstance(syms, str):
+        return (encode_sym(syms), encode_sym("<e>"))
+    else:
+        assert(len(syms) == 2), f"Long symbol {syms}"
+        return (encode_sym(syms[0]), encode_sym(syms[1]))
 
 class ISLTransducer:
     def __init__(self, fst):
@@ -20,6 +43,72 @@ class ISLTransducer:
         xcopy.state_names = copy.copy(self.state_names)
         xcopy.uninteresting_chars = copy.copy(self.uninteresting_chars)
         return xcopy
+
+    def to_json(self):
+        if self.state_names == None:
+            return self.canonical_to_json()
+        else:
+            copy = replace_star_transitions(self)
+            copy = replace_star_state(copy)
+            return copy.isl_to_json()
+
+    def canonical_to_json(self):
+        #encode the "canonical" (ie minimal) transducer as JSON by recording each transition
+        #because the states of this transducer don't have intelligible names, it is necessary
+        #to write each arc with both source and destination state labels
+        isyms = self.fst.input_symbols()
+        osyms = self.fst.output_symbols()
+        arcs = []
+
+        for state in sorted(self.fst.states()):
+            for arc in self.fst.arcs(state):
+                isym = isyms.find(arc.ilabel)
+                osym = osyms.find(arc.olabel)
+                arc_encoding = ((state,
+                                 encode_sym(isym),
+                                 *encode_output(osym),
+                                 arc.nextstate))
+                arcs.append(arc_encoding)
+
+        return arcs
+
+    def isl_to_json(self):
+        #encode the "isl" transducer (Chandlee's notation) as JSON by recording only exceptional transitions
+        #this transducer has named states, and the identity transducer has arcs all of the form:
+        # a (b:b) b
+        #only arcs deviating from this pattern must be recorded
+        #moreover, the destination state of an arc src (in:out) dest is always named
+        # src[1:].in, and does not need to be specified
+        #there is a single sink state, whose finality is determined by its name (</s>), so this is not encoded
+        r_state_names = {}
+        for si, ind in self.state_names.items():
+            r_state_names[ind] = si
+        isyms = self.fst.input_symbols()
+        osyms = self.fst.output_symbols()
+        arcs = []
+
+        def encode_state(state_name):
+            if state_name == ("<s>",):
+                return 1
+            elif state_name == ("</s>",):
+                return 2
+            else:
+                assert(len(state_name) == 1)
+                return ord(state_name[0])
+
+        for state in sorted(self.fst.states()):
+            for arc in self.fst.arcs(state):
+                isym = isyms.find(arc.ilabel)
+                osym = osyms.find(arc.olabel)
+                if isym == osym:
+                    continue
+
+                arc_encoding = ((encode_state(r_state_names[state]),
+                                 encode_sym(isym),
+                                 *encode_output(osym)))
+                arcs.append(arc_encoding)
+
+        return arcs
 
 def choose_input_char(alphabet, xi, f_len):
     if xi == 0:
@@ -69,7 +158,9 @@ def select_factors(n_factors, factor_length, alphabet, p_progressive:float=0, p_
 
             if random.random() < p_progressive:
                 if epenthesis_type == "progressive":
-                    f_out = fx[:-1] + ( (random.choice(output_alphabet), random.choice(output_alphabet)), )
+                    # do not allow epenthesis of epsilon, regardless of whether it's allowed
+                    # (this outcome is not really epenthetic, so it's degenerate)
+                    f_out = fx[:-1] + ( (random.choice(alphabet), random.choice(alphabet)), )
                 else:
                     f_out = fx[:-1] + (random.choice(output_alphabet),) 
             elif random.random() < p_regressive:
@@ -80,9 +171,9 @@ def select_factors(n_factors, factor_length, alphabet, p_progressive:float=0, p_
             if epenthesis_type == "short":
                 index = random.randrange(len(f_out))
                 if random.random() < .5:
-                    n_r = (f_out[index], random.choice(output_alphabet))
+                    n_r = (f_out[index], random.choice(alphabet))
                 else:
-                    n_r = (random.choice(output_alphabet), f_out[index])
+                    n_r = (random.choice(alphabet), f_out[index])
                 f_new = list(f_out)
                 f_new[index] = n_r
                 f_out = tuple(f_new)
@@ -339,9 +430,14 @@ def replace_stars(char, out, alphabet):
         for repl in alphabet:
             n_char = replace(char, repl)
             if isinstance(out, str):
-                n_out = replace(out, repl)
+                if out.startswith("("):
+                    out = ast.literal_eval(out)
+                    n_out = str(tuple([replace(ci, repl) for ci in out]))
+                else:
+                    n_out = replace(out, repl)
             else:
                 n_out = tuple([replace(ci, repl) for ci in out])
+
             yield n_char, n_out
     else:
         yield char, out
@@ -593,9 +689,9 @@ def test_fst(fst, string, expected=None):
         print("TEST FAILED: expected", " ".join(expected))
         print("Unnormalized:", comp.string(out_sym))
 
-def normalize_string(string):
+def normalize_string(string, delimiter=""):
     nStr = string.replace("(", "").replace(")", "").replace(",", "").replace("'", "").replace("<e>", "")
-    return " ".join(nStr.split())
+    return delimiter.join(nStr.split())
     
 if __name__ == "__main__":
     alphabet = "abcdefg"
