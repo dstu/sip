@@ -3,6 +3,7 @@ import json
 import math
 import os
 import sys
+import ast
 from typing import List, Tuple, Set, Iterable
 
 import random
@@ -14,7 +15,7 @@ import pynini, pywrapfst
 import time
 import tqdm
 
-from sip.data_gen.gen_isl import select_factors, make_2isl_transducer, NotKISLError, replace_star_transitions, replace_star_state, print_fst
+from sip.data_gen.gen_isl import select_factors, make_2isl_transducer, NotKISLError, replace_star_transitions, replace_star_state, print_fst, SYMBOL_RDELIM
 from sip.data_gen.utils import gen_pair, one_step, FSTCollection, random_subset, replace_arc, fst_to_json
 
 # use some ASCII control codes to take special meaning.
@@ -22,13 +23,75 @@ SYMBOL_ID = 17
 SYMBOL_TO_UPPER = 18
 SYMBOL_TO_LOWER = 19
 
-
 def postprocess_for_sampling(fst: pynini.Fst):
     fst = replace_star_transitions(fst)
     if fst.state_names != None:
         fst = replace_star_state(fst)
+
+    #check that the star replacement hasn't hosed the output charset
+    osyms = fst.fst.output_symbols()
+    for ii in range(osyms.num_symbols()):
+        key = osyms.get_nth_key(ii)
+        val = osyms.find(key)
+        if val.startswith("("):
+            val = ast.literal_eval(val)
+            assert(len(val) <= 2)
+
     return fst
+
+def gen_and_recode_pair(fst, isyms, osyms, **kwargs):
+    #normal pair generator assumes internal char representation is utf8, but the ISL-fst uses its own symtab
+    output_auto = pynini.randgen(fst, **kwargs)
     
+    istr = []
+    ostr = []
+    for state in output_auto.topsort().states():
+        arcs = list(output_auto.arcs(state))
+        assert(len(arcs) <= 1)
+        if arcs:
+            arc = arcs[0]
+            if arc.ilabel != 0: #length limit adds a ton of <e>:<e> transitions, which are the only input <e>s
+                istr.append(isyms.find(arc.ilabel))
+                if arc.olabel != 0: #trim output epsilons, leaving their inputs
+                    ostr.append(osyms.find(arc.olabel))
+
+    unicodeIstr = []
+    for ii in istr:
+        if ii == "</s>":
+            unicodeIstr.append(chr(SYMBOL_RDELIM))
+        else:
+            unicodeIstr.append(ii)
+
+    # print(istr)
+    # print(ostr)
+
+    unicodeOstr = []
+    for oi in ostr:
+        if oi == "</s>":
+            unicodeOstr.append(chr(SYMBOL_RDELIM))
+        elif oi.startswith("("):
+            ois = ast.literal_eval(oi)
+            unicodeOstr += ois
+        else:
+            unicodeOstr.append(oi)
+
+    return "".join(unicodeIstr), "".join(unicodeOstr)
+
+def recode_string(unicode_str, vocab):
+    fst = pynini.Fst()
+    fst.add_states(len(unicode_str) + 1)
+
+    for ind, ch in enumerate(unicode_str):
+        if ord(ch) == SYMBOL_RDELIM:
+            ch = "</s>"
+        fst.add_arc(ind,
+                    pynini.Arc(vocab.find(ch),
+                               vocab.find(ch),
+                               0,
+                               ind + 1))
+    fst.set_final(len(unicode_str))
+    return fst
+
 vocab = [chr(x) for x in range(32, 127)]
 vocab = vocab + [chr(i) for i in range(592, 687+1)] # add unicode characters for IPA symbols.
 vocab = sorted(set(vocab))
@@ -37,6 +100,7 @@ vocab.remove("]")
 vocab.remove("[")
 vocab.remove(chr(92)) # backslash, this messes things up as well!
 vocab.remove("*") #used as internal representation for "any char" within the isl code
+vocab.remove("(") #so we can assume this character is always the first of a portmanteau string
 
 if __name__ == "__main__":
     os.makedirs("data/pretrain_2isl", exist_ok=True)
@@ -54,6 +118,7 @@ if __name__ == "__main__":
     seeds = [random.randint(0, 100000000000) for _ in range(num_fsts)]
 
     DESIRED_MAX_FACTORS = 4
+    # edit this line to set the representation to "isl" or "canonical"
     REPRESENTATION = "isl"
 
     name = f"pretrain_s{DESIRED_MAX_FACTORS}_{REPRESENTATION}"
@@ -70,9 +135,23 @@ if __name__ == "__main__":
                                  epsilon_allowed=True, p_epenthesis=0.05)
         try:
             fst = make_2isl_transducer(factors, chosen_vocab, minimize=(REPRESENTATION == "canonical"))
+            print("Factors:", factors)
+            # print_fst(fst)
             # their code has a validity check here to make sure none of the arcs
             # have invalid character codes in the sampling machine
-            # this may not be needed?
+            # we don't need that, but it is possible to get extra-long output symbols
+            fst_invalid = False
+            osyms = fst.fst.output_symbols()
+            for ii in range(osyms.num_symbols()):
+                key = osyms.get_nth_key(ii)
+                val = osyms.find(key)
+                if val.startswith("("):
+                    val = ast.literal_eval(val)
+                    if len(val) > 2:
+                        fst_invalid = True
+
+            if fst_invalid:
+                continue
         except NotKISLError:
             continue
 
@@ -112,13 +191,13 @@ if __name__ == "__main__":
     task_id = 0
 
     max_digits = len(str(len(fst_collection)))
-    with (open(f"data/pretrain/train_{name}.jsonl", "w") as f_train,
-          pynini.Far(f"data/pretrain/train_{name}.far", mode="w") as far_train,
-          pynini.Far(f"data/pretrain/dev_{name}.far", mode="w") as far_dev,
-          pynini.Far(f"data/pretrain/test_{name}.far", mode="w") as far_test,
-          open(f"data/pretrain/dev_{name}.jsonl", "w") as f_dev,
-          open(f"data/pretrain/easy_dev_{name}.jsonl", "w") as easy_dev_f,
-          open(f"data/pretrain/test_{name}.jsonl", "w") as f_test):
+    with (open(f"data/pretrain_2isl/train_{name}.jsonl", "w") as f_train,
+          pynini.Far(f"data/pretrain_2isl/train_{name}.far", mode="w") as far_train,
+          pynini.Far(f"data/pretrain_2isl/dev_{name}.far", mode="w") as far_dev,
+          pynini.Far(f"data/pretrain_2isl/test_{name}.far", mode="w") as far_test,
+          open(f"data/pretrain_2isl/dev_{name}.jsonl", "w") as f_dev,
+          open(f"data/pretrain_2isl/easy_dev_{name}.jsonl", "w") as easy_dev_f,
+          open(f"data/pretrain_2isl/test_{name}.jsonl", "w") as f_test):
 
         for fst, chosen_vocab in tqdm.tqdm(fst_collection):
 
@@ -135,17 +214,21 @@ if __name__ == "__main__":
 
             task_id += 1
 
-            fst_as_json = fst_to_json(fst)
-            print(fst)
-            print(fst_as_json)
-            assert(0)
+            fst_as_json = fst.to_json()
             max_length_json = max(max_length_json, len(fst_as_json))
             data_points = []
             for _ in range(num_ex_per_task):
-                inp, o = gen_pair(train_fst, seed=random.randint(0, 100000000000))
+                inp, o = gen_and_recode_pair(train_fst,
+                                             fst_for_sampling.fst.input_symbols(),
+                                             fst_for_sampling.fst.output_symbols(),
+                                             seed=random.randint(0, 100000000000))
+                #print(f"i!{inp}!i o!{o}!o")
                 # assert pynini.compose(pynini.accep(inp, token_type="utf8"), train_fst).num_states() > 0
                 # assert pynini.compose(train_fst, pynini.accep(o, token_type="utf8")).num_states() > 0
-                assert pynini.compose(pynini.compose(pynini.accep(inp, token_type="utf8"), train_fst), pynini.accep(o, token_type="utf8")).num_states() > 0
+
+                #checks that the i/o pair is validly produced by the transducer
+                #but vanilla 'accep' will not work for custom symtabs
+                #assert pynini.compose(pynini.compose(pynini.accep(inp, token_type="utf8"), train_fst), pynini.accep(o, token_type="utf8")).num_states() > 0
 
                 data_points.append({"FST": fst_as_json, "input": inp, "output": o, "task_id": task_id})
 
@@ -167,7 +250,7 @@ if __name__ == "__main__":
             else:
                 break
 
-            far.add(task_id_s, fst)
+            far.add(task_id_s, fst.fst)
 
             for datapoint in data_points:
                 f.write(json.dumps(datapoint))
@@ -177,18 +260,22 @@ if __name__ == "__main__":
             if curr_train <= num_train_ex and curr_easy_dev < num_easy_dev_ex:
                 curr_easy_dev += 1
                 inputs = set(datapoint["input"] for datapoint in data_points)
-                excluded_inputs = pynini.union(*[pynini.accep(input, token_type="utf8") for input in inputs])
+                excluded_inputs = pynini.union(*[recode_string(input, fst_for_sampling.fst.input_symbols())
+                                                 for input in inputs])
 
-                sigma_star = one_step(chosen_vocab).closure()
+                sigma_star = one_step(fst_for_sampling.fst.input_symbols()).closure()
 
                 allowed_inputs = pynini.difference(sigma_star, excluded_inputs)
                 easy_dev_fst = pynini.compose(allowed_inputs, train_fst)
 
                 for _ in range(num_ex_per_task):
-                    inp, o = gen_pair(easy_dev_fst, seed=random.randint(0, 100000000000))
-
+                    inp, o = gen_and_recode_pair(easy_dev_fst,
+                                                 fst_for_sampling.fst.input_symbols(),
+                                                 fst_for_sampling.fst.output_symbols(),
+                                                 seed=random.randint(0, 100000000000))
+                    #print(f"I!{inp}!I O!{o}!O")
                     assert inp not in inputs
-                    assert pynini.compose(pynini.accep(inp, token_type="utf8"), train_fst).num_states() > 0
+                    #assert pynini.compose(pynini.accep(inp, token_type="utf8"), train_fst).num_states() > 0
 
                     easy_dev_f.write(json.dumps({"FST": fst_as_json, "input": inp, "output": o, "task_id": task_id}))
                     easy_dev_f.write("\n")
