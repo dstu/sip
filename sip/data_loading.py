@@ -53,29 +53,53 @@ def prepare_task_dataset(path:str, tokenizer: AutoTokenizer, batch_size: int, ra
     return DataLoader(dataset, collate_fn=DataCollatorForSeq2Seq(tokenizer), batch_sampler=ts)
 
 
-def fst_to_vector(fst_tokenizer, num_states, fst: List[Tuple[int, str, str, int]]) -> np.array:
-    assert len(fst[0]) == 4 or len(fst[0]) == 5
+def fst_to_vector(fst_tokenizer, num_states, fst: List[Tuple[int, str, str, int]], fst_format=None) -> np.array:
+    if fst_format == None:
+        assert len(fst[0]) == 4 or len(fst[0]) == 5
 
     fst_rep = np.zeros((len(fst), len(fst[0])), dtype=np.int64)
     for j, f in enumerate(fst):
-        s, i, o, sp = f[:4]
-        assert s < num_states-1 #last state is reserved for padding
-        assert sp < num_states-1
-        fst_rep[j, 0] = s
+        if fst_format == None:
+            s, i, o, sp = f[:4]
+            assert s < num_states-1 #last state is reserved for padding
+            assert sp < num_states-1
 
-        i_encoded = fst_tokenizer(i)["input_ids"]
-        assert len(i_encoded) == 1
-        fst_rep[j, 1] = i_encoded[0]
+            fst_rep[j, 0] = s
 
-        o_encoded = fst_tokenizer(o)["input_ids"]
-        assert len(o_encoded) == 1
-        fst_rep[j, 2] = o_encoded[0]
+            i_encoded = fst_tokenizer(i)["input_ids"]
+            assert len(i_encoded) == 1
+            fst_rep[j, 1] = i_encoded[0]
 
-        fst_rep[j, 3] = sp
+            o_encoded = fst_tokenizer(o)["input_ids"]
+            assert len(o_encoded) == 1
+            fst_rep[j, 2] = o_encoded[0]
 
-        if len(f) == 5:
-            # for final state indicator
-            fst_rep[j, 4] = f[4]
+            fst_rep[j, 3] = sp
+
+            if len(f) == 5:
+                # for final state indicator
+                fst_rep[j, 4] = f[4]
+        elif fst_format == "isl_canon":
+            s, i, o1, o2, sp = f[:5]
+            assert s < num_states-1 #last state is reserved for padding
+            assert sp < num_states-1
+
+            fst_rep[j, 0] = s
+
+            i_encoded = fst_tokenizer(i)["input_ids"]
+            assert len(i_encoded) == 1
+            fst_rep[j, 1] = i_encoded[0]
+
+            o1_encoded = fst_tokenizer(o1)["input_ids"]
+            assert len(o1_encoded) == 1
+            fst_rep[j, 2] = o1_encoded[0]
+
+            o2_encoded = fst_tokenizer(o2)["input_ids"]
+            assert len(o2_encoded) == 1
+            fst_rep[j, 3] = o2_encoded[0]
+
+            fst_rep[j, 4] = sp
+
     return fst_rep
 
 def batch_fsts(fst_reps: List[np.array], num_states, max_len=None) -> np.array:
@@ -94,7 +118,7 @@ def batch_fsts(fst_reps: List[np.array], num_states, max_len=None) -> np.array:
 
 
 def load_fst_jsonl(path: str, tokenizer: AutoTokenizer, fst_tokenizer: Union[str, PreTrainedTokenizerFast], batch_size:int, num_states: int, random_order: bool = True,
-                   max_len: int = None, max_n:int=None, map_f = None, filter_f = None):
+                   max_len: int = None, max_n:int=None, map_f = None, filter_f = None, fst_format=None):
     if isinstance(fst_tokenizer, str):
         fst_tokenizer = PreTrainedTokenizerFast.from_pretrained(fst_tokenizer)
 
@@ -119,7 +143,7 @@ def load_fst_jsonl(path: str, tokenizer: AutoTokenizer, fst_tokenizer: Union[str
                 if "task_id" in d:
                     data["task_ids"].append(d["task_id"])
 
-                data["fst_rep"].append(fst_to_vector(fst_tokenizer, num_states, map_f(d["FST"])))
+                data["fst_rep"].append(fst_to_vector(fst_tokenizer, num_states, map_f(d["FST"]), fst_format=fst_format))
 
                 i += 1
                 if max_n is not None and i > max_n:
