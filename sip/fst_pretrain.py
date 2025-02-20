@@ -57,7 +57,13 @@ class SimpleFSTEmbedder(MachineEmbedder):
             self.dropout = torch.nn.Dropout(0.1)
             self.output_layer = torch.nn.Linear(mlp_hidden_dim, self.trafo_embedding_dim)
         else:
-            self.input_layer = torch.nn.Linear(state_embedding_dim * 2 + token_embedding_dim * 2 + final_state_embedding_dim, self.trafo_embedding_dim)
+            if self.fst_format == None:
+                self.input_layer = torch.nn.Linear(state_embedding_dim * 2 + token_embedding_dim * 2 + final_state_embedding_dim, self.trafo_embedding_dim)
+            elif self.fst_format == "isl_canon":
+                self.input_layer = torch.nn.Linear(state_embedding_dim * 2 + token_embedding_dim * 3, self.trafo_embedding_dim)
+            else:
+                assert(0), f"bad fst format {self.fst_format}"
+
 
     @property
     def device(self):
@@ -86,6 +92,8 @@ class SimpleFSTEmbedder(MachineEmbedder):
             io_rep = torch.flatten(io_rep, start_dim=2)
 
             flat_total_fst_rep = torch.cat([from_rep, to_rep, io_rep], dim=2) #shape (batch, transition, 2* state embed dim + 3 * token embed dim)
+        else:
+            assert(0), f"bad fst format {self.fst_format}"
 
         if self.down_project is not None:
             fst_embed = self.output_layer(self.dropout(torch.nn.functional.gelu(self.down_project(flat_total_fst_rep))))
@@ -195,8 +203,12 @@ class SIPPreTrainingModel(PreTrainedModel):
             self.dropout = torch.nn.Dropout(0.1)
             self.output_layer = torch.nn.Linear(config.mlp_hidden_dim, config.d_model)
         else:
-            self.input_layer = torch.nn.Linear(config.state_embedding_dim * 2 + config.token_embedding_dim * 2 + config.final_state_embedding_dim, config.d_model)
-
+            if self.fst_format == None:
+                self.input_layer = torch.nn.Linear(config.state_embedding_dim * 2 + config.token_embedding_dim * 2 + config.final_state_embedding_dim, config.d_model)
+            elif self.fst_format == "isl_canon":
+                self.input_layer = torch.nn.Linear(config.state_embedding_dim * 2 + config.token_embedding_dim * 2, config.d_model)
+            else:
+                assert(0), f"bad fst format {self.fst_format}"
 
     def prepare_input(self, kwargs):
         embedded_inputs = self.model.get_input_embeddings()(kwargs["input_ids"])
