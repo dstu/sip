@@ -45,10 +45,20 @@ class SimpleFSTEmbedder(MachineEmbedder):
                  *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.state_embeddings = torch.nn.Embedding(num_states, state_embedding_dim)
-        self.fst_tokenizer = fst_tokenizer
+        if isinstance(fst_tokenizer, str):
+            print("fst_pretrain: loading tokenizer from path", fst_tokenizer)
+            self.fst_tokenizer = PreTrainedTokenizerFast.from_pretrained(fst_tokenizer)
+            print("fst_pretrain: loading fst tokenizer:", self.fst_tokenizer.vocab_size)
+        else:
+            assert(self.fst_tokenizer != None)
+            self.fst_tokenizer = fst_tokenizer
+        
         self.token_embeddings = torch.nn.Embedding(self.fst_tokenizer.vocab_size, token_embedding_dim)
         self.final_state_embedding = torch.nn.Embedding(num_final_state_info, final_state_embedding_dim)
 
+        print("activating fst tokenizer:", self.fst_tokenizer.vocab_size, "token emb dim", token_embedding_dim)
+        # assert(0)
+        
         self.fst_format = fst_format
 
         self.down_project = None
@@ -86,6 +96,10 @@ class SimpleFSTEmbedder(MachineEmbedder):
             else:
                 flat_total_fst_rep = torch.cat([from_rep, to_rep, io_rep], dim=2) #shape (batch, transition, 2* state embed dim + 2 * token embed dim)
         elif self.fst_format == "isl_canon":
+            # print("formatting fst")
+            # print(fst_rep)
+            # print("max", torch.max(fst_rep, dim=0))
+            # print("shape of token emb:", self.token_embeddings.weight.shape)
             from_rep = self.state_embeddings(fst_rep[:, :, 0]) #shape (batch, transition count, embed dim)
             to_rep = self.state_embeddings(fst_rep[:, :, 4]) #shape (batch, transition count, embed dim)
             io_rep = self.token_embeddings(fst_rep[:, :, 1:4]) #shape (batch, transition count, 2, embed dim)

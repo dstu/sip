@@ -1,6 +1,6 @@
 local num_states = 15;
 
-local fst_tokenizer_path = "namednil/sip-fst-tokenizer";
+local fst_tokenizer_path = "unicode_char_tokenizer_ipa.json";
 
 local train_data_path = "data/pretrain_2isl/train_pretrain_s4_canonical.jsonl";
 local dev_data_path = "data/pretrain_2isl/dev_pretrain_s4_canonical.jsonl";
@@ -19,7 +19,7 @@ local data_loader(fname, batch_size) = {
         "path": fname,
         "tokenizer": tokenizer,
         "num_states": num_states,
-        "fst_tokenizer": tokenizer,
+        "fst_tokenizer": fst_tokenizer_path,
         "fst_format": "isl_canon",
 } ;
 
@@ -44,8 +44,8 @@ local data_loader(fname, batch_size) = {
                 "state_embedding_dim": 64,
                 "token_embedding_dim": 256,
                 "final_state_embedding_dim": 16,
-                "fst_tokenizer": tokenizer,
-                "fst_format": "canon_isl",
+                "fst_tokenizer": fst_tokenizer_path,
+                "fst_format": "isl_canon",
         },
 
         "model": {

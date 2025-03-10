@@ -84,18 +84,32 @@ def fst_to_vector(fst_tokenizer, num_states, fst: List[Tuple[int, str, str, int]
             assert s < num_states-1 #last state is reserved for padding
             assert sp < num_states-1
 
+            #dimensions of rep: state, (i, o1, o2), dest, cf. fst_pretrain:88
             fst_rep[j, 0] = s
 
+            # print("fffffff")
+            # print(j, f)
+            # print("tokenizing")
+            # print(s)
+            # print("iiiiiiiiiiiiii")
+            # print(i)
+            # print("oooooooooooooo")
+            # print(o1)
+            # print(o2)
+
             i_encoded = fst_tokenizer(i)["input_ids"]
+            # print("i_enc", i_encoded)
             assert len(i_encoded) == 1
             fst_rep[j, 1] = i_encoded[0]
 
             o1_encoded = fst_tokenizer(o1)["input_ids"]
             assert len(o1_encoded) == 1
+            # print("o1_enc", o1_encoded)
             fst_rep[j, 2] = o1_encoded[0]
 
             o2_encoded = fst_tokenizer(o2)["input_ids"]
             assert len(o2_encoded) == 1
+            # print("o2_enc", o2_encoded)
             fst_rep[j, 3] = o2_encoded[0]
 
             fst_rep[j, 4] = sp
@@ -120,7 +134,12 @@ def batch_fsts(fst_reps: List[np.array], num_states, max_len=None) -> np.array:
 def load_fst_jsonl(path: str, tokenizer: AutoTokenizer, fst_tokenizer: Union[str, PreTrainedTokenizerFast], batch_size:int, num_states: int, random_order: bool = True,
                    max_len: int = None, max_n:int=None, map_f = None, filter_f = None, fst_format=None):
     if isinstance(fst_tokenizer, str):
+        print("data_loading: loading tokenizer from path", fst_tokenizer)
         fst_tokenizer = PreTrainedTokenizerFast.from_pretrained(fst_tokenizer)
+        print("loaded an object of type", type(fst_tokenizer))
+        print("data_loading: loading fst tokenizer:", fst_tokenizer.vocab_size)
+    else:
+        print("data_loading: failed to recover a tokenizer for fsts")
 
     def mapper(examples):
         d = tokenizer(examples["input"])
