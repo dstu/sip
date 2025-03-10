@@ -185,6 +185,8 @@ def pretrain(model,
             logger.log_metrics("pretrain_dev", {"acc": acc, "edit_dist": edit, "per": per})
             print("Validation", {"acc": acc, "edit_dist": edit, "per": per})
 
+        model.save_pretrained(save_dir) #how did they not save checkpoints before?
+
         model.train()
 
     if hack_parallelize:
