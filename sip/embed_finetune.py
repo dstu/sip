@@ -24,6 +24,7 @@ def load_struct_prefix_with_init(model_str: str,
                                    random_selection: bool = False,
                                    fst_file_path:str = None,
                                    map_location = None,
+                                   fst_format:str = None,
                                    *args, **kwargs):
     import sip.fst_pretrain
     from sip.data_loading import load_fst_jsonl
@@ -38,7 +39,7 @@ def load_struct_prefix_with_init(model_str: str,
 
     data_loader = iter(load_fst_jsonl(fst_file_path, tokenizer, fst_tokenizer=fst_tokenizer_path, num_states=num_states,
                                       batch_size=num_examples, random_order=random_selection,
-                                      max_len=prefix_length))
+                                      max_len=prefix_length, fst_format=fst_format))
     batch = next(data_loader)
 
     activations, _ = machine_embedder.prepare_input(batch) #shape (batch, prefix length, embed dim)
