@@ -117,6 +117,7 @@ class FSTCollection:
                 graphs = [graphfst(graph) for graph, _ in self.hash2fst[hash]]
                 if not any(pywrapfst.isomorphic(graph, f) for graph in graphs):
                     self.hash2fst[hash].append((f1, vocab))
+                    self.size += 1
             else:
                 graphs = [graphfst(graph) for graph in self.hash2fst[hash]]
                 if not any(pywrapfst.isomorphic(graph, f) for graph in graphs):

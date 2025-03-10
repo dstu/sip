@@ -14,7 +14,8 @@ import pynini, pywrapfst
 import time
 import tqdm
 
-from sip.data_gen.utils import gen_pair, one_step, FSTCollection, random_subset, replace_arc, fst_to_json
+from sip.data_gen.utils import gen_pair, one_step, FSTCollection, random_subset, replace_arc
+from sip.data_gen.isl_sampling_utils import fst_to_json
 
 # use some ASCII control codes to take special meaning.
 SYMBOL_ID = 17

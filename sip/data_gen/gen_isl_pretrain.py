@@ -16,81 +16,13 @@ import time
 import tqdm
 
 from sip.data_gen.gen_isl import select_factors, make_2isl_transducer, NotKISLError, replace_star_transitions, replace_star_state, print_fst, SYMBOL_RDELIM
-from sip.data_gen.utils import gen_pair, one_step, FSTCollection, random_subset, replace_arc, fst_to_json
+from sip.data_gen.isl_sampling_utilities import postprocess_for_sampling, gen_and_recode_pair, recode_string, fst_to_json
+from sip.data_gen.utils import gen_pair, one_step, FSTCollection, random_subset, replace_arc
 
 # use some ASCII control codes to take special meaning.
 SYMBOL_ID = 17
 SYMBOL_TO_UPPER = 18
 SYMBOL_TO_LOWER = 19
-
-def postprocess_for_sampling(fst: pynini.Fst):
-    fst = replace_star_transitions(fst)
-    if fst.state_names != None:
-        fst = replace_star_state(fst)
-
-    #check that the star replacement hasn't hosed the output charset
-    osyms = fst.fst.output_symbols()
-    for ii in range(osyms.num_symbols()):
-        key = osyms.get_nth_key(ii)
-        val = osyms.find(key)
-        if val.startswith("("):
-            val = ast.literal_eval(val)
-            assert(len(val) <= 2)
-
-    return fst
-
-def gen_and_recode_pair(fst, isyms, osyms, **kwargs):
-    #normal pair generator assumes internal char representation is utf8, but the ISL-fst uses its own symtab
-    output_auto = pynini.randgen(fst, **kwargs)
-    
-    istr = []
-    ostr = []
-    for state in output_auto.topsort().states():
-        arcs = list(output_auto.arcs(state))
-        assert(len(arcs) <= 1)
-        if arcs:
-            arc = arcs[0]
-            if arc.ilabel != 0: #length limit adds a ton of <e>:<e> transitions, which are the only input <e>s
-                istr.append(isyms.find(arc.ilabel))
-                if arc.olabel != 0: #trim output epsilons, leaving their inputs
-                    ostr.append(osyms.find(arc.olabel))
-
-    unicodeIstr = []
-    for ii in istr:
-        if ii == "</s>":
-            unicodeIstr.append(chr(SYMBOL_RDELIM))
-        else:
-            unicodeIstr.append(ii)
-
-    # print(istr)
-    # print(ostr)
-
-    unicodeOstr = []
-    for oi in ostr:
-        if oi == "</s>":
-            unicodeOstr.append(chr(SYMBOL_RDELIM))
-        elif oi.startswith("("):
-            ois = ast.literal_eval(oi)
-            unicodeOstr += ois
-        else:
-            unicodeOstr.append(oi)
-
-    return "".join(unicodeIstr), "".join(unicodeOstr)
-
-def recode_string(unicode_str, vocab):
-    fst = pynini.Fst()
-    fst.add_states(len(unicode_str) + 1)
-
-    for ind, ch in enumerate(unicode_str):
-        if ord(ch) == SYMBOL_RDELIM:
-            ch = "</s>"
-        fst.add_arc(ind,
-                    pynini.Arc(vocab.find(ch),
-                               vocab.find(ch),
-                               0,
-                               ind + 1))
-    fst.set_final(len(unicode_str))
-    return fst
 
 vocab = [chr(x) for x in range(32, 127)]
 vocab = vocab + [chr(i) for i in range(592, 687+1)] # add unicode characters for IPA symbols.
@@ -110,16 +42,16 @@ if __name__ == "__main__":
     print(vocab)
 
     fst_collection = FSTCollection()
-    # num_data_points = 50_000
+    num_data_points = 50_000
     # num_data_points = 10_000
-    num_data_points = 10
-    num_fsts = 2*num_data_points
+    # num_data_points = 10
+    num_fsts = 5*num_data_points # make sure we don't run out of seeds
     num_ex_per_task = 5
     seeds = [random.randint(0, 100000000000) for _ in range(num_fsts)]
 
     DESIRED_MAX_FACTORS = 4
     # edit this line to set the representation to "isl" or "canonical"
-    REPRESENTATION = "isl"
+    REPRESENTATION = "canonical"
 
     name = f"pretrain_s{DESIRED_MAX_FACTORS}_{REPRESENTATION}"
 
@@ -151,8 +83,10 @@ if __name__ == "__main__":
                         fst_invalid = True
 
             if fst_invalid:
+                print("Continuing: fst is not valid")
                 continue
         except NotKISLError:
+            print("Continuing: fst is not k-isl")
             continue
 
         max_num_factors = max(max_num_factors, len(factors))
@@ -162,14 +96,18 @@ if __name__ == "__main__":
         # so we can omit the cyclicity check
         fst_collection.maybe_add(fst, chosen_vocab)
 
+        print("check on length:", len(fst_collection), len(fst_collection.to_list()))
+        assert(len(fst_collection) == len(fst_collection.to_list()))
+
         if len(fst_collection) > num_data_points:
+            print("fst collection is large enough to halt", len(fst_collection), num_data_points)
             break
 
     fst_collection = fst_collection.to_list()
     random.shuffle(fst_collection)
 
     if len(fst_collection) < num_data_points:
-        print(len(fst_collection), num_data_points)
+        print("Collected", len(fst_collection), "items but wanted", num_data_points)
         raise ValueError("fst collection not large enough")
 
     # split into train/dev/test
@@ -214,7 +152,7 @@ if __name__ == "__main__":
 
             task_id += 1
 
-            fst_as_json = fst.to_json()
+            fst_as_json = fst_to_json(fst)
             max_length_json = max(max_length_json, len(fst_as_json))
             data_points = []
             for _ in range(num_ex_per_task):
