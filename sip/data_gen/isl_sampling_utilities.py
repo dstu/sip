@@ -15,7 +15,7 @@ import pynini, pywrapfst
 import time
 import tqdm
 
-from sip.data_gen.gen_isl import select_factors, make_2isl_transducer, NotKISLError, replace_star_transitions, replace_star_state, print_fst, SYMBOL_RDELIM, SYMBOL_EPSILON
+from sip.data_gen.gen_isl import select_factors, make_2isl_transducer, NotKISLError, replace_star_transitions, replace_star_state, print_fst, normalize_string, SYMBOL_RDELIM, SYMBOL_EPSILON
 from sip.data_gen.utils import gen_pair, one_step, FSTCollection, random_subset, replace_arc, fst_to_json
 
 def postprocess_for_sampling(fst: pynini.Fst):
@@ -33,6 +33,19 @@ def postprocess_for_sampling(fst: pynini.Fst):
             assert(len(val) <= 2)
 
     return fst
+
+def apply_fst(fst, string):
+    in_sym = fst.fst.input_symbols()
+    out_sym = fst.fst.output_symbols()
+    fst.fst.arcsort("ilabel")
+    string = " ".join(string) + " </s>"
+    acc = pynini.accep(string, token_type=in_sym)
+    acc.set_input_symbols(in_sym)
+    acc.set_output_symbols(in_sym)
+
+    comp = pynini.compose(acc, fst.fst)
+    result = normalize_string(comp.string(out_sym), delimiter="")
+    return result
 
 def fst_to_json(fst: pynini.Fst):
     s = []
