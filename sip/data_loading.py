@@ -9,6 +9,8 @@ from datasets import Dataset
 from torch.utils.data import Sampler, RandomSampler, BatchSampler, DataLoader, SequentialSampler
 from transformers import AutoTokenizer, DataCollatorForSeq2Seq, PreTrainedTokenizerFast
 
+from sip.data_gen.gen_isl import SYMBOL_EPSILON
+
 import datasets
 
 import tqdm
@@ -113,6 +115,35 @@ def fst_to_vector(fst_tokenizer, num_states, fst: List[Tuple[int, str, str, int]
             fst_rep[j, 3] = o2_encoded[0]
 
             fst_rep[j, 4] = sp
+        elif fst_format == "isl_markov":
+            s, i, o1, o2, sp = f[:5]
+            #no assertion checks on state names, which are coded as strings, not numbers
+
+            if i == o1 and o2 == SYMBOL_EPSILON:
+                #an identity arc
+                continue
+
+            #dimensions of rep: state, (i, o1, o2): dest is omitted
+            s_encoded = fst_tokenizer(s)["input_ids"]
+            assert(len(s_encoded) == 1)
+            fst_rep[j, 0] = s_encoded[0]
+
+            i_encoded = fst_tokenizer(i)["input_ids"]
+            # print("i_enc", i_encoded)
+            assert len(i_encoded) == 1
+            fst_rep[j, 1] = i_encoded[0]
+
+            o1_encoded = fst_tokenizer(o1)["input_ids"]
+            assert len(o1_encoded) == 1
+            # print("o1_enc", o1_encoded)
+            fst_rep[j, 2] = o1_encoded[0]
+
+            o2_encoded = fst_tokenizer(o2)["input_ids"]
+            assert len(o2_encoded) == 1
+            # print("o2_enc", o2_encoded)
+            fst_rep[j, 3] = o2_encoded[0]
+        else:
+            assert(0), f"bad fst format {self.fst_format}"
 
     return fst_rep
 
