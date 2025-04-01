@@ -71,6 +71,8 @@ class SimpleFSTEmbedder(MachineEmbedder):
                 self.input_layer = torch.nn.Linear(state_embedding_dim * 2 + token_embedding_dim * 2 + final_state_embedding_dim, self.trafo_embedding_dim)
             elif self.fst_format == "isl_canon":
                 self.input_layer = torch.nn.Linear(state_embedding_dim * 2 + token_embedding_dim * 3, self.trafo_embedding_dim)
+            elif self.fst_format == "isl_markov":
+                self.input_layer = torch.nn.Linear(token_embedding_dim * 4, self.trafo_embedding_dim)
             else:
                 assert(0), f"bad fst format {self.fst_format}"
 
@@ -102,10 +104,16 @@ class SimpleFSTEmbedder(MachineEmbedder):
             # print("shape of token emb:", self.token_embeddings.weight.shape)
             from_rep = self.state_embeddings(fst_rep[:, :, 0]) #shape (batch, transition count, embed dim)
             to_rep = self.state_embeddings(fst_rep[:, :, 4]) #shape (batch, transition count, embed dim)
-            io_rep = self.token_embeddings(fst_rep[:, :, 1:4]) #shape (batch, transition count, 2, embed dim)
+            io_rep = self.token_embeddings(fst_rep[:, :, 1:4]) #shape (batch, transition count, 3, embed dim)
             io_rep = torch.flatten(io_rep, start_dim=2)
 
             flat_total_fst_rep = torch.cat([from_rep, to_rep, io_rep], dim=2) #shape (batch, transition, 2* state embed dim + 3 * token embed dim)
+        elif self.fst_format == "isl_markov":
+            from_rep = self.token_embeddings(fst_rep[:, :, 0]) #shape (batch, transition count, embed dim)
+            io_rep = self.token_embeddings(fst_rep[:, :, 1:4]) #shape (batch, transition count, 3, embed dim)
+            io_rep = torch.flatten(io_rep, start_dim=2)
+
+            flat_total_fst_rep = torch.cat([from_rep, io_rep], dim=2) #shape (batch, transition, 4 * token embed dim)
         else:
             assert(0), f"bad fst format {self.fst_format}"
 
@@ -221,6 +229,8 @@ class SIPPreTrainingModel(PreTrainedModel):
                 self.input_layer = torch.nn.Linear(config.state_embedding_dim * 2 + config.token_embedding_dim * 2 + config.final_state_embedding_dim, config.d_model)
             elif self.fst_format == "isl_canon":
                 self.input_layer = torch.nn.Linear(config.state_embedding_dim * 2 + config.token_embedding_dim * 2, config.d_model)
+            elif self.fst_format == "isl_markov":
+                self.input_layer = torch.nn.Linear(config.token_embedding_dim * 4, config.d_model)
             else:
                 assert(0), f"bad fst format {self.fst_format}"
 
