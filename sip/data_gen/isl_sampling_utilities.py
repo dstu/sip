@@ -85,6 +85,18 @@ def fst_to_json(fst: pynini.Fst):
                 assert(len(ochar) == 1)
                 return ochar, chr(SYMBOL_EPSILON)
 
+    def state_to_str(name):
+        if name == "<e>":
+            return chr(SYMBOL_EPSILON)
+        else:
+            if name == "</s>" or name == "<s>":
+                 #use the same symbol for both edge markers
+                return chr(SYMBOL_RDELIM)
+            else:
+                assert(len(name) == 1), f"Bad symbol !{name}!"
+                return name
+            
+    state_names = fst.state_names
     fst = fst.fst
     assert fst.start() == 0
 
@@ -92,7 +104,16 @@ def fst_to_json(fst: pynini.Fst):
         for arc in fst.arcs(state):
             i1 = in_to_str(arc.ilabel, fst.input_symbols())
             o1, o2 = out_to_str(arc.olabel, fst.output_symbols())
-            s.append((state, i1, o1, o2, arc.nextstate))
+            if state_names != None:
+                sn_i = state_names[state]
+                sn_o = state_names[arc.nextstate]
+                assert(len(sn_i) == 1)
+                assert(len(sn_o) == 1)
+                sn_i = state_to_str(sn_i[0])
+                sn_o = state_to_str(sn_o[0])
+                s.append((sn_i, i1, o1, o2, sn_o))
+            else:
+                s.append((state, i1, o1, o2, arc.nextstate))
     return s
 
 def gen_and_recode_pair(fst, isyms, osyms, **kwargs):

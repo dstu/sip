@@ -35,7 +35,11 @@ vocab.remove("*") #used as internal representation for "any char" within the isl
 vocab.remove("(") #so we can assume this character is always the first of a portmanteau string
 
 if __name__ == "__main__":
-    os.makedirs("data/pretrain_2isl", exist_ok=True)
+    # edit this line to set the representation to "markov" or "canonical"
+    REPRESENTATION = "markov"
+
+    COLLECTION = f"data/pretrain_2isl_{REPRESENTATION}"
+    os.makedirs(COLLECTION, exist_ok=True)
     t0 = time.time()
     random.seed(55)
 
@@ -43,15 +47,13 @@ if __name__ == "__main__":
 
     fst_collection = FSTCollection()
     num_data_points = 50_000
-    # num_data_points = 10_000
+    # num_data_points = 1000
     # num_data_points = 10
     num_fsts = 5*num_data_points # make sure we don't run out of seeds
     num_ex_per_task = 5
     seeds = [random.randint(0, 100000000000) for _ in range(num_fsts)]
 
     DESIRED_MAX_FACTORS = 4
-    # edit this line to set the representation to "isl" or "canonical"
-    REPRESENTATION = "canonical"
 
     name = f"pretrain_s{DESIRED_MAX_FACTORS}_{REPRESENTATION}"
 
@@ -129,16 +131,15 @@ if __name__ == "__main__":
     task_id = 0
 
     max_digits = len(str(len(fst_collection)))
-    with (open(f"data/pretrain_2isl/train_{name}.jsonl", "w") as f_train,
-          pynini.Far(f"data/pretrain_2isl/train_{name}.far", mode="w") as far_train,
-          pynini.Far(f"data/pretrain_2isl/dev_{name}.far", mode="w") as far_dev,
-          pynini.Far(f"data/pretrain_2isl/test_{name}.far", mode="w") as far_test,
-          open(f"data/pretrain_2isl/dev_{name}.jsonl", "w") as f_dev,
-          open(f"data/pretrain_2isl/easy_dev_{name}.jsonl", "w") as easy_dev_f,
-          open(f"data/pretrain_2isl/test_{name}.jsonl", "w") as f_test):
+    with (open(f"{COLLECTION}/train_{name}.jsonl", "w") as f_train,
+          pynini.Far(f"{COLLECTION}/train_{name}.far", mode="w") as far_train,
+          pynini.Far(f"{COLLECTION}/dev_{name}.far", mode="w") as far_dev,
+          pynini.Far(f"{COLLECTION}/test_{name}.far", mode="w") as far_test,
+          open(f"{COLLECTION}/dev_{name}.jsonl", "w") as f_dev,
+          open(f"{COLLECTION}/easy_dev_{name}.jsonl", "w") as easy_dev_f,
+          open(f"{COLLECTION}/test_{name}.jsonl", "w") as f_test):
 
         for fst, chosen_vocab in tqdm.tqdm(fst_collection):
-
             fst_for_sampling = postprocess_for_sampling(fst)
             length_restriction = one_step(fst_for_sampling.fst.input_symbols()).closure(1, 35)
             delimited_length_restriction = (length_restriction +

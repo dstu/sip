@@ -4,6 +4,8 @@ import Levenshtein
 
 from collections import deque
 
+from sip.data_gen.utils import write_tsv
+
 class MovingAvg:
     # Naive implementation
     def __init__(self, window_length):
@@ -28,9 +30,10 @@ class MovingAvg:
         return sum(self.l) / len(self.l)
 
 
-def evaluate_on(model, tokenizer, dataloader):
+def evaluate_on(model, tokenizer, dataloader, log_result=None):
   correct, total, edit_dist, per = 0,0,0,0
   model.eval()
+  all_preds = []
   for test_batch in dataloader:
     test_batch = {k: v.to(model.device) for k,v in test_batch.items()}
     test_batch_inputs = dict(test_batch)
@@ -38,10 +41,17 @@ def evaluate_on(model, tokenizer, dataloader):
     r = tokenizer.batch_decode(model.generate(**test_batch_inputs, max_new_tokens=test_batch["labels"].shape[1]+2,
                                               early_stopping="never", num_beams=1, no_repeat_ngram_size=0), skip_special_tokens=True)
     gold = tokenizer.batch_decode(100*(test_batch["labels"] == -100) + test_batch["labels"], skip_special_tokens=True) # replace -100 by 0
+
+    if log_result != None:
+        all_preds += list(zip(gold, r))
+
     correct += sum( [x == y for x,y in zip(r, gold)])
     total += len(gold)
     edit_dist += sum( Levenshtein.distance(x,y) for x,y in zip(r, gold))
     per += sum(Levenshtein.distance(x,y)/max(1, len(y)) for x,y in zip(r, gold))
+
+  if log_result != None:
+      write_tsv(log_result, all_preds)
   return correct/total, edit_dist/total, per/total
 
 #################

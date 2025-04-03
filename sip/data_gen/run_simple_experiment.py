@@ -81,20 +81,36 @@ class ExperimentLogger:
         fields["num_train"] = self.num_train
         self.writer.writerow(fields)
 
-def run_experiment(words, process, run, num_train, num_test, n_trials=64):
+def gen_balanced_problem(cat_words, process, num_train, num_test):
+    train = []
+    test = []
+    for cat, words in cat_words.items():
+        selected = np.random.choice(words, size=num_train)
+        train += list(zip(selected, [process(xx) for xx in selected]))
+        selected = np.random.choice(words, size=num_test)
+        test += list(zip(selected, [process(xx) for xx in selected]))
+
+    np.random.shuffle(train)
+    np.random.shuffle(test)
+
+    return train, test
+
+def run_experiment(words, process, run, num_train, num_test, n_trials):
     os.makedirs(f"data/eval/{run}", exist_ok=True)
-    with open(f"data/eval/{run}/scores.tsv", "w") as sfh:
+    with open(f"data/eval/{run}/scores.tsv", "a") as sfh:
         fields = ["num_train", "sample", "step", "acc", "edit_dist", "per",
                   "acc_avg_10", "edit_dist_avg_10", "per_avg_10"]
         scoreWriter = csv.DictWriter(sfh, fieldnames=fields, dialect="excel-tab")
         
         for ii in range(n_trials):
-            changed, unchanged = gen_phonology_problem(words, process, balance=True, n_exes=num_train + num_test)
-            train, test = train_test_split(changed, unchanged, num_test)
+            #changed, unchanged = gen_phonology_problem(words, process, balance=True, n_exes=num_train + num_test)
+            #train, test = train_test_split(changed, unchanged, num_test)
+            train, test = gen_balanced_problem(words, process, num_train, num_test)
             train = [(inp + chr(SYMBOL_RDELIM), outp) for (inp, outp) in train]
             test = [(inp + chr(SYMBOL_RDELIM), outp) for (inp, outp) in test]
             write_tsv(f"data/eval/{run}/i_{ii}_t_{num_train}_v_{num_test}_train.tsv", train)
             write_tsv(f"data/eval/{run}/i_{ii}_t_{num_train}_v_{num_test}_val.tsv", test)
+            predFile =  f"data/eval/{run}/i_{ii}_t_{num_train}_v_{num_test}_pred.tsv"
 
             logger = ExperimentLogger(scoreWriter, num_train=num_train, sample=ii)
             
@@ -128,9 +144,8 @@ def run_experiment(words, process, run, num_train, num_test, n_trials=64):
                            ],
                            grad_scale=1.0,
                            logger=logger,
+                           eval_predictions_file=predFile,
                            )
-            #score = evaluate_model(...)
-            #scoreWriter.write_row({ "index" : ii, "score" : score})
 
 if __name__ == "__main__":
     #implement a simple assimilation pattern
@@ -140,7 +155,7 @@ if __name__ == "__main__":
         toy_alphabet.update(vi)
     toy_alphabet = "".join(toy_alphabet)
     print("Alphabet:", toy_alphabet)
-        
+
     fst = make_2isl_transducer(
         [
             (("n", "m"), ("m", "m")),
@@ -190,5 +205,13 @@ if __name__ == "__main__":
     print()
     for pair in test:
         print(pair)
+
+    run_name = "devoice_d"
+    with open(f"data/eval/{run_name}/scores.tsv", "w") as sfh:
+        fields = ["num_train", "sample", "step", "acc", "edit_dist", "per",
+                  "acc_avg_10", "edit_dist_avg_10", "per_avg_10"]
+        scoreWriter = csv.DictWriter(sfh, fieldnames=fields, dialect="excel-tab")
+        scoreWriter.writeheader()
         
-    run_experiment(german_words, run_devoice, "devoice_d", 10, 64)
+    for size in range(10, 60, 10):
+        run_experiment(german_words, run_devoice, run_name, size, 16)
