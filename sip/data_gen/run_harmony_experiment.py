@@ -17,6 +17,8 @@ from sip.task_finetune import *
 from sip.data_gen.run_simple_experiment import *
 
 if __name__ == "__main__":
+    args = parse_experiment_arguments("harmony")
+
     spanish = np.loadtxt("https://raw.githubusercontent.com/unimorph/spa/refs/heads/master/spa",
                         dtype=str, delimiter="\t")
     spanish_words = list([xx for xx in spanish[:, 1] if xx.isalpha()])
@@ -60,12 +62,12 @@ if __name__ == "__main__":
             sOld = sNew
             sNew = re.sub("a(.*)e", "a\\1A", sOld)
         return sNew
-    
-    mode = int(sys.argv[1])
-    assert(0 < mode <= 4)
+
+    process = args.process
+    assert(0 < process <= 4)
     fns = [run_fn_s1, run_fn_s2, run_fn_s3, run_fn_s4]
-    fn = fns[mode - 1]
-    print("Running for mode", mode - 1)
+    fn = fns[process - 1]
+    print("Running for process", process - 1)
 
     train, test = gen_balanced_problem(catWords, fn, 4, 2)
     for pair in train:
@@ -75,7 +77,10 @@ if __name__ == "__main__":
         print(pair)
     print("-----")
 
-    run_name = f"harmony_{mode}"
+    model = args.model
+    fst_format = args.fst_format
+
+    run_name = f"harmony_{process}_{model}_{fst_format}"
     os.makedirs(f"data/eval/{run_name}", exist_ok=True)
     with open(f"data/eval/{run_name}/scores.tsv", "w") as sfh:
         fields = ["num_train", "sample", "step", "acc", "edit_dist", "per",
@@ -83,5 +88,8 @@ if __name__ == "__main__":
         scoreWriter = csv.DictWriter(sfh, fieldnames=fields, dialect="excel-tab")
         scoreWriter.writeheader()
 
-    for size in range(2, 40, 2):
-        run_experiment(catWords, fn, run_name, size, 8, n_trials=16)
+    load_model = get_model_loader(model, fst_format=fst_format)
+
+    for size in range(args.train_min, args.train_max, args.train_incr):
+        run_experiment(catWords, fn, run_name, size, args.n_test, n_trials=args.n_samples,
+                       load_model_function=load_model)

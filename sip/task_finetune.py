@@ -72,12 +72,16 @@ def finetune_model(model,
 
         # Evaluate
         if (not eval_only_last_epochs) or epoch >= num_epochs - moving_avg_steps:
-            acc, edit, per = evaluate_on(model, tokenizer, logger.progress_bar(validation_data_loader),
+            acc, edit, per, binmets = evaluate_on(model, tokenizer, logger.progress_bar(validation_data_loader),
                                          log_result=eval_predictions_file)
             logger.log_metrics("finetune_dev", {"acc": acc, "edit_dist": edit, "per": per,
-                                                            f"acc_avg_{moving_avg_steps}": avg_acc.append(acc),
-                                                            f"edit_dist_avg_{moving_avg_steps}": avg_edit.append(edit),
-                                                            f"per_avg_{moving_avg_steps}": avg_per.append(per)})
+                                                f"acc_avg_{moving_avg_steps}": avg_acc.append(acc),
+                                                f"edit_dist_avg_{moving_avg_steps}": avg_edit.append(edit),
+                                                f"per_avg_{moving_avg_steps}": avg_per.append(per),
+                                                f"tpr" : binmets["tpr"],
+                                                f"fpr" : binmets["fpr"],
+                                                f"tnr" : binmets["tnr"],
+                                                f"inform" : binmets["inform"]})
             print({"acc": acc, "edit_dist": edit, "per": per})
 
     return model
