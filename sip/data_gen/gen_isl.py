@@ -683,7 +683,7 @@ def test_fst(fst, string, expected=None):
     acc.set_output_symbols(in_sym)
     
     comp = pynini.compose(acc, fst.fst)
-    result = normalize_string(comp.string(out_sym))
+    result = normalize_string(comp.string(out_sym), delimiter=" ")
     print(result)
     if expected != None and result != " ".join(expected):
         print("TEST FAILED: expected", " ".join(expected))

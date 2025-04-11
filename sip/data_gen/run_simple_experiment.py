@@ -2,6 +2,7 @@ import os
 import csv
 import itertools
 import numpy as np
+import argparse
 
 from sip.data_gen.gen_isl import *
 from sip.data_gen.isl_sampling_utilities import *
@@ -23,6 +24,19 @@ class NotEnoughExamplesError(Exception):
             return f"Cannot find {nn//2} examples of each class."
         else:
             return f"Cannot find {nn} examples."
+
+def parse_experiment_arguments(name):
+    parser = argparse.ArgumentParser(prog=name)
+    parser.add_argument("--model", choices=["local_isl", "t5", "SIP"])
+    parser.add_argument("--fst_format", default=None, choices=["isl_canon", "isl_markov"])
+    parser.add_argument("--process", type=int)
+    parser.add_argument("--train_min", default=2, type=int)
+    parser.add_argument("--train_max", default=40, type=int)
+    parser.add_argument("--train_incr", default=2, type=int)
+    parser.add_argument("--n_test", default=8, type=int)
+    parser.add_argument("--n_samples", default=16, type=int)
+
+    return parser.parse_args()
 
 def gen_phonology_problem(vocabulary, replace_fn, balance=True, n_exes=20):
     v_order = vocabulary[:]
@@ -95,11 +109,46 @@ def gen_balanced_problem(cat_words, process, num_train, num_test):
 
     return train, test
 
-def run_experiment(words, process, run, num_train, num_test, n_trials):
+def get_model_loader(mode, fst_format=None):
+    if mode == "local_isl":
+        assert(fst_format in ["isl_canon", "isl_markov"])
+        if fst_format == "isl_canon":
+            model = "models/w_fsts_pretrain_s4_32"
+        else:
+            model = "models/w_fsts_pretrain_s4_32_markov"
+
+        tokenizer = transformers.AutoTokenizer.from_pretrained("google/byt5-small")
+
+        def load_model():
+            return load_struct_prefix_with_init(
+                prefix_length=50,
+                num_examples=32,
+                random_selection=True,
+                fst_tokenizer_path="unicode_char_tokenizer_ipa.json",
+                tokenizer=tokenizer,
+                model_str=model,
+                fst_format=fst_format,
+                map_location="cpu")
+    elif mode == "t5":
+        def load_model():
+            load_model = "google/byt5-small"
+            model = transformers.AutoModelForSeq2SeqLM.from_pretrained(load_model)
+            return model
+    elif mode == "SIP":
+        def load_model():
+            load_model = "namednil/sip-d4"
+            model = SIPFinetuningModel.from_pretrained(load_model)
+            return model
+    else:
+        assert(0), f"Bad model loader {mode}"
+
+    return load_model
+
+def run_experiment(words, process, run, num_train, num_test, n_trials, load_model_function):
     os.makedirs(f"data/eval/{run}", exist_ok=True)
     with open(f"data/eval/{run}/scores.tsv", "a") as sfh:
         fields = ["num_train", "sample", "step", "acc", "edit_dist", "per",
-                  "acc_avg_10", "edit_dist_avg_10", "per_avg_10"]
+                  "acc_avg_10", "edit_dist_avg_10", "per_avg_10", "tpr", "tnr", "fpr", "inform"]
         scoreWriter = csv.DictWriter(sfh, fieldnames=fields, dialect="excel-tab")
         
         for ii in range(n_trials):
@@ -122,16 +171,7 @@ def run_experiment(words, process, run, num_train, num_test, n_trials):
             val_loader = prepare_task_dataset(batch_size=32,
                                                 path=f"data/eval/{run}/i_{ii}_t_{num_train}_v_{num_test}_val.tsv",
                                                 tokenizer=tokenizer)
-            model = load_struct_prefix_with_init(
-                prefix_length=50,
-                num_examples=32,
-                random_selection=True,
-                fst_tokenizer_path="unicode_char_tokenizer_ipa.json",
-                tokenizer=tokenizer,
-                model_str="models/w_fsts_pretrain_s4_32",
-                fst_format="isl_canon",
-                map_location="cpu")
-            
+            model = load_model_function()
             finetune_model(model=model,
                            tokenizer=tokenizer,
                            train_data_loader=train_loader,
