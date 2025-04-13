@@ -164,7 +164,7 @@ def restrict_input(fst, a):
     """
     return a @ fst
 def write_tsv(fname, data):
-    with open(fname, "w") as f:
+    with open(fname, "w", encoding="utf8") as f:
         f.write("input\toutput\n")
         for x,y in data:
             f.write(x)
