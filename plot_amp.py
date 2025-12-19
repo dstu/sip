@@ -18,6 +18,9 @@ import pandas as pd
 import seaborn as sns
 
 
+sns.set(font_scale=1.4)
+
+
 # Maps from model name to a glob pattern for experiment results. Extend this as
 # more models are added.
 DATA_PATHS = {
@@ -35,6 +38,31 @@ TASK_NAMES = {
     3: "a.?e->a.?A",
     4: "a.*e->a.*A",
 }
+
+
+def metric2label(metric: Literal["acc", "edit_dist", "inform"]) -> str:
+    """Maps from an internal metric name to a more plot-friendly label."""
+    return {
+        "acc": "Accuracy",
+        "inform": "Informedness",
+        "edit_dist": "Edit distance",
+    }[metric]
+
+
+def title2nicer(label: str) -> str:
+    """Maps from the label of an automatically generated plot title to a nicer one.
+
+    Keeps `label` as-is if no nicer title is found."""
+    return {
+        "ae->aA": "a → A / e _",
+        "a.e->a.A": "a → A / e [ ] _",
+        "a.?e->a.?A": "a → A / e [ ] [ ] _",
+        "a.*e->a.*A": "a → A / e [ ] * _",
+        "english2": "English",
+        "german-syll": "German",
+        "polish": "Polish",
+        "turkish-childes": "Turkish",
+    }.get(label, label)
 
 
 def loadScores(root: str) -> pd.DataFrame:
@@ -81,9 +109,12 @@ def plotSingle(
     Returns the plot.
     """
     selectors = (data.task == task) & (data.model == model)
-    return sns.relplot(
+    g = sns.relplot(
         data=data[selectors], kind="line", estimator="median",
         errorbar=("pi", 50), x="num_train", y=metric, err_style="bars")
+    g.set(xlabel="Fine-tuning size", ylabel=metric2label(metric))
+    g.facet_axis(0, 0).set_title(title2nicer(task))
+    return g
 
 
 def plotModelByTaskGrid(
@@ -110,6 +141,9 @@ def plotModelByTaskGrid(
     g.map_dataframe(
         sns.lineplot, data=selected, estimator="median", errorbar=("pi", 50),
         x="num_train", y=metric, err_style="bars")
+    g.set(xlabel="Fine-tuning size", ylabel=metric2label(metric))
+    for i in range(len(tasks)):
+        g.facet_axis(0, i).set_title(title2nicer(tasks[i]))
     return g
 
 
@@ -138,6 +172,9 @@ def plotModelByTaskOverlay(
         sns.lineplot, data=selected, estimator="median", errorbar=("pi", 50),
         x="num_train", y=metric, err_style="band", hue="model")
     g.add_legend()
+    g.set(xlabel="Fine-tuning size", ylabel=metric2label(metric))
+    for i in range(len(tasks)):
+        g.facet_axis(0, i).set_title(title2nicer(tasks[i]))
     return g
 
 
