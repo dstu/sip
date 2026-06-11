@@ -88,7 +88,7 @@ def set_experiment_paths(experiment):
         "SIP-ISL": f"{EXPERIMENT_HEADER}_*local_isl_isl_*",
         "SIP-FST": f"{EXPERIMENT_HEADER}_*SIP_None*",
         "SIP-TSL": f"{EXPERIMENT_HEADER}_*local_tsl_tsl_canon*",
-        "t5": f"{EXPERIMENT_HEADER}_*t5_None*",
+        "ByT5": f"{EXPERIMENT_HEADER}_*t5_None*",
     }
 
 def metric2label(metric: Literal["acc", "edit_dist", "inform"]) -> str:
@@ -170,7 +170,7 @@ def loadScores(root: str) -> pd.DataFrame:
 def plotSingle(
     data: pd.DataFrame,
     task: Literal["ae->aA", "a.e->a.A", "a.?e->a.?A", "a.*e->a.*A"],
-    model: Literal["SIP-ISL", "SIP-FST", "t5"],
+    model: Literal["SIP-ISL", "SIP-FST", "ByT5"],
     metric: Literal["acc", "edit_dist", "inform"],
     cipher: Literal["facet", "aggregate", "remove"],
 ):
@@ -194,7 +194,7 @@ def plotSingle(
 
 def plotModelByTaskGrid(
     data: pd.DataFrame,
-    models: List[Literal["SIP-ISL", "SIP-FST", "t5"]],
+    models: List[Literal["SIP-ISL", "SIP-FST", "ByT5"]],
     tasks: List[Literal["ae->aA", "a.e->a.A", "a.?e->a.?A", "a.*e->a.*A"]],
     metric: Literal["acc", "edit_dist", "inform"],
     cipher: Literal["facet", "aggregate", "remove"],
@@ -226,7 +226,7 @@ def plotModelByTaskGrid(
 
 def plotModelByTaskOverlay(
     data: pd.DataFrame,
-    models: List[Literal["SIP-ISL", "SIP-FST", "t5"]],
+    models: List[Literal["SIP-ISL", "SIP-FST", "ByT5"]],
     tasks: List[Literal["ae->aA", "a.e->a.A", "a.?e->a.?A", "a.*e->a.*A"]],
     metric: Literal["acc", "edit_dist", "inform"],
     cipher: Literal["facet", "aggregate", "remove"],

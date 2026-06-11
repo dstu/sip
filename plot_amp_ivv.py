@@ -24,7 +24,7 @@ DATA_PATHS = {
     "SIP-ISL": "ivv_*_local_isl_isl_*",
     "SIP-TSL": "ivv_*_local_tsl_tsl_*",
     "SIP-FST": "ivv_*_SIP_None",
-    "t5": "ivv_*_t5_None",
+    "ByT5": "ivv_*_t5_None",
 }
 
 
@@ -76,7 +76,7 @@ def loadScores(root: str) -> pd.DataFrame:
 def plotSingle(
     data: pd.DataFrame,
     task: Literal["da->Da", "da->DDa", "ad->aD", "ad->aDD", "ada->aDa", "ada->aDDa"],
-    model: Literal["SIP-ISL", "SIP-FST", "t5"],
+    model: Literal["SIP-ISL", "SIP-FST", "ByT5"],
     metric: Literal["acc", "edit_dist", "inform"],
 ):
     """Plots a single metric from `data` with bootstrapped confidence region.
@@ -94,7 +94,7 @@ def plotSingle(
 
 def plotModelByTaskGrid(
     data: pd.DataFrame,
-    models: List[Literal["SIP-ISL", "SIP-FST", "t5"]],
+    models: List[Literal["SIP-ISL", "SIP-FST", "ByT5"]],
     tasks: List[Literal["ae->aA", "a.e->a.A", "a.?e->a.?A", "a.*e->a.*A"]],
     metric: Literal["acc", "edit_dist", "inform"],
 ):
@@ -121,7 +121,7 @@ def plotModelByTaskGrid(
 
 def plotModelByTaskOverlay(
     data: pd.DataFrame,
-    models: List[Literal["SIP-ISL", "SIP-FST", "t5"]],
+    models: List[Literal["SIP-ISL", "SIP-FST", "ByT5"]],
     tasks: List[Literal["ae->aA", "a.e->a.A", "a.?e->a.?A", "a.*e->a.*A"]],
     metric: Literal["acc", "edit_dist", "inform"],
 ):
